@@ -13,7 +13,6 @@ SMS_URL = "http://168.119.13.175/ints/client/SMSCDRStats"
 USERNAME = "smartmethod4k"
 PASSWORD = "smartmethod"
 
-# 👉 GitHub এ রাখবে (Railway তে না)
 BOT_TOKEN = "8762087022:AAF9hjOokbaUBLJkUOBaUfjWVK7gn9xQFus"
 CHAT_ID = "-1003820143618"
 
@@ -63,11 +62,11 @@ def login():
     captcha = solve_captcha(str(captcha_text))
 
     payload = {
-        "username": USERNAME,
-        "password": PASSWORD,
-        "captcha": captcha
-    }
-
+    "username": USERNAME,
+    "password": PASSWORD,
+    "capt": captcha   # 👈 এটা MUST
+}
+    
     print("🚀 Sending login...")
 
     res = session.post(LOGIN_URL, data=payload, timeout=20, allow_redirects=True)
