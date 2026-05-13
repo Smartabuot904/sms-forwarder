@@ -18,9 +18,6 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1"
 }
 
 session = requests.Session()
@@ -28,13 +25,12 @@ session = requests.Session()
 def solve_captcha(text):
     print(f"Raw Captcha: {text}")
     try:
-        if "What is" in text and "=" in text:
+        if "What is" in text and "+" in text and "=" in text:
             part = text.split("What is")[1].split("=")[0].strip()
-            if '+' in part:
-                a, b = part.split('+')
-                result = int(a.strip()) + int(b.strip())
-                print(f"Captcha Solved: {result}")
-                return str(result)
+            a, b = [x.strip() for x in part.split('+')]
+            result = int(a) + int(b)
+            print(f"Captcha Solved: {result}")
+            return str(result)
     except:
         pass
     return "0"
@@ -44,15 +40,13 @@ def login():
     session = requests.Session()
     session.headers.update(HEADERS)
     
-    for attempt in range(5):
+    for attempt in range(6):
         try:
-            # Get Login Page
             r = session.get(LOGIN_URL, timeout=20)
-            print(f"Login Page Status: {r.status_code}")
-            
             soup = BeautifulSoup(r.text, 'html.parser')
-            captcha_text = soup.find(string=lambda t: t and "What is" in t)
-            captcha_answer = solve_captcha(captcha_text if captcha_text else "")
+            
+            captcha_text = soup.find(string=lambda t: t and "What is" in str(t))
+            captcha_answer = solve_captcha(str(captcha_text))
             
             payload = {
                 "username": USERNAME,
@@ -61,35 +55,39 @@ def login():
             }
             
             print(f"Attempt {attempt+1} | Captcha: {captcha_answer}")
-            response = session.post(LOGIN_URL, data=payload, headers=HEADERS, timeout=20)
+            response = session.post(LOGIN_URL, data=payload, timeout=20, allow_redirects=True)
             
-            print(f"Login Response Code: {response.status_code}")
+            print(f"Status Code: {response.status_code} | Final URL: {response.url}")
             
-            if response.status_code == 200 and ("SMSCDRStats" in response.text or "Dashboard" in response.text):
-                print("✅ Login Successful!")
+            # আরও ভালো চেকিং
+            if any(keyword in response.text for keyword in ["SMSCDRStats", "SMS CDR Reports", "Range", "Number", "CLI", "My Payout"]):
+                print("✅ Login Successful! (Detected Dashboard)")
                 return True
             else:
-                print("❌ Login Failed")
+                print("❌ Login Failed - Dashboard not detected")
+                print("Response snippet:", response.text[:400])
                 
         except Exception as e:
-            print("Error:", str(e))
+            print("Error:", e)
         
-        time.sleep(4)
+        time.sleep(5)
     
     return False
 
-# ============= MAIN LOOP =============
+# ============= MAIN =============
 if __name__ == "__main__":
     print("🚀 SMS Forwarder Started...")
     
     if not login():
-        print("❌ Login failed after retries.")
+        print("❌ Login failed after multiple attempts.")
         while True:
-            time.sleep(60)
+            print("Waiting 40 seconds before retry...")
+            time.sleep(40)
             if login():
                 break
     
     print("✅ Monitoring Started (2s interval)")
+    
     while True:
         try:
             r = session.get(DASHBOARD_URL, timeout=15)
@@ -97,28 +95,31 @@ if __name__ == "__main__":
             table = soup.find("table")
             
             if table:
-                rows = table.find_all("tr")[1:12]
+                rows = table.find_all("tr")[1:15]
                 for row in rows:
                     cols = row.find_all("td")
                     if len(cols) >= 5:
                         date = cols[0].text.strip()
                         number = cols[2].text.strip()
-                        msg = cols[4].text.strip()[:500]
+                        message = cols[4].text.strip()[:600]
                         
-                        text = f"🔔 <b>New WhatsApp Code</b>\n\n" \
-                               f"📱 <b>Number:</b> {number}\n" \
-                               f"⏰ <b>Time:</b> {date}\n\n" \
-                               f"📨 <b>Message:</b>\n{msg}"
+                        text = f"""🔔 <b>New WhatsApp Code Received</b>
+
+📱 <b>Number:</b> {number}
+⏰ <b>Time:</b> {date}
+
+📩 <b>Message:</b>
+{message}"""
                         
                         requests.post(
                             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                            data={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
+                            json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
                         )
-                        time.sleep(0.7)
+                        time.sleep(0.6)
             
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Checked")
             time.sleep(2)
             
         except Exception as e:
-            print("Loop Error:", e)
-            time.sleep(10)
+            print("Error in loop:", e)
+            time.sleep(8)
