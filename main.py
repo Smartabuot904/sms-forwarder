@@ -15,14 +15,12 @@ PASSWORD = "smartmethod"
 BOT_TOKEN = "8762087022:AAF9hjOokbaUBLJkUOBaUfjWVK7gn9xQFus"
 CHAT_ID = "-1003820143618"
 
-last_seen_time = None
 # ===========================================
 
 session = requests.Session()
 
 def solve_captcha(text):
     try:
-        # Example: "What is 8 + 0 = ?"
         part = text.split("What is")[1].split("=")[0].strip()
         nums = part.split("+")
         return str(int(nums[0].strip()) + int(nums[1].strip()))
@@ -52,7 +50,6 @@ def login():
         return True
     else:
         print("❌ Login Failed")
-        print(response.text[:500])
         return False
 
 def get_latest_sms():
@@ -64,7 +61,7 @@ def get_latest_sms():
         if not table:
             return []
         
-        rows = table.find_all("tr")[1:11]  # Top 10 latest
+        rows = table.find_all("tr")[1:15]   # আরও কিছু রো নেওয়া হলো
         sms_list = []
         
         for row in rows:
@@ -77,7 +74,7 @@ def get_latest_sms():
                 sms_list.append({
                     "date": date,
                     "number": number,
-                    "message": message[:400]  # Limit length
+                    "message": message[:500]
                 })
         return sms_list
     except:
@@ -91,16 +88,16 @@ def send_to_telegram(message):
         "parse_mode": "HTML"
     }
     try:
-        requests.post(url, data=data, timeout=10)
+        requests.post(url, data=data, timeout=8)
     except:
         pass
 
 # ============= MAIN LOOP =============
 if __name__ == "__main__":
-    print("🚀 SMS Forwarder Started...")
+    print("🚀 SMS Forwarder Started (2 Second Interval)...")
     
     if not login():
-        print("Login failed. Check credentials.")
+        print("❌ Login failed!")
         exit()
     
     while True:
@@ -108,17 +105,17 @@ if __name__ == "__main__":
             sms_list = get_latest_sms()
             
             for sms in sms_list:
-                msg_text = f"🔔 <b>New WhatsApp Code</b>\n\n" \
+                msg_text = f"🔔 <b>New Message Received</b>\n\n" \
                            f"📱 <b>Number:</b> {sms['number']}\n" \
                            f"⏰ <b>Time:</b> {sms['date']}\n\n" \
                            f"📩 <b>Message:</b>\n{sms['message']}"
                 
                 send_to_telegram(msg_text)
-                time.sleep(1)
+                time.sleep(0.5)   # টেলিগ্রামে একটু গ্যাপ
             
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Checked successfully")
-            time.sleep(15)  # ১৫ সেকেন্ড পর পর চেক
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Checked")
+            time.sleep(2)   # ← এখানে ২ সেকেন্ড
             
         except Exception as e:
             print("Error:", e)
-            time.sleep(30)
+            time.sleep(5)
