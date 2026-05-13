@@ -4,9 +4,10 @@ import time
 from datetime import datetime
 
 # ================== CONFIG ==================
-PANEL_URL = "http://168.119.13.175"
-LOGIN_URL = f"{PANEL_URL}/ints/login"
-DASHBOARD_URL = f"{PANEL_URL}/ints/client/SMSCDRStats"
+PANEL_BASE = "http://168.119.13.175"
+LOGIN_URL = "http://168.119.13.175/ints/login"
+DASHBOARD_URL = "http://168.119.13.175/ints/client/SMSDashboard"
+SMS_URL = "http://168.119.13.175/ints/client/SMSCDRStats"   # যেখানে মেসেজ দেখা যায়
 
 USERNAME = "smartmethod4k"
 PASSWORD = "smartmethod"
@@ -40,8 +41,10 @@ def login():
     session = requests.Session()
     session.headers.update(HEADERS)
     
-    for attempt in range(6):
+    print("🔑 Trying to login...")
+    for attempt in range(5):
         try:
+            # লগইন পেজ খুলি
             r = session.get(LOGIN_URL, timeout=20)
             soup = BeautifulSoup(r.text, 'html.parser')
             
@@ -54,72 +57,75 @@ def login():
                 "captcha": captcha_answer
             }
             
-            print(f"Attempt {attempt+1} | Captcha: {captcha_answer}")
             response = session.post(LOGIN_URL, data=payload, timeout=20, allow_redirects=True)
             
-            print(f"Status Code: {response.status_code} | Final URL: {response.url}")
+            print(f"Attempt {attempt+1} | Status: {response.status_code} | URL: {response.url}")
             
-            # আরও ভালো চেকিং
-            if any(keyword in response.text for keyword in ["SMSCDRStats", "SMS CDR Reports", "Range", "Number", "CLI", "My Payout"]):
-                print("✅ Login Successful! (Detected Dashboard)")
+            # সফল লগইন চেক (একাধিক সম্ভাব্য শব্দ)
+            if any(word in response.text for word in ["SMSDashboard", "SMSCDRStats", "SMS CDR", "My Payout", "Recent Ranges"]):
+                print("✅ Login Successful!")
                 return True
-            else:
-                print("❌ Login Failed - Dashboard not detected")
-                print("Response snippet:", response.text[:400])
                 
         except Exception as e:
-            print("Error:", e)
+            print("Login Error:", e)
         
-        time.sleep(5)
+        time.sleep(4)
     
+    print("❌ Login Failed after all attempts")
     return False
 
-# ============= MAIN =============
+# ============= MAIN LOOP =============
 if __name__ == "__main__":
-    print("🚀 SMS Forwarder Started...")
+    print("🚀 SMS Forwarder Started (2 Second Interval)...")
     
     if not login():
-        print("❌ Login failed after multiple attempts.")
+        print("Could not login. Retrying every 30 seconds...")
         while True:
-            print("Waiting 40 seconds before retry...")
-            time.sleep(40)
+            time.sleep(30)
             if login():
                 break
     
-    print("✅ Monitoring Started (2s interval)")
+    print("✅ Successfully Logged In - Now Monitoring SMS...")
     
     while True:
         try:
-            r = session.get(DASHBOARD_URL, timeout=15)
+            # SMS Report পেজে যাও
+            r = session.get(SMS_URL, timeout=15)
             soup = BeautifulSoup(r.text, 'html.parser')
-            table = soup.find("table")
             
+            table = soup.find("table")
             if table:
-                rows = table.find_all("tr")[1:15]
+                rows = table.find_all("tr")[1:15]   # সর্বশেষ ১৪টা মেসেজ
+                
                 for row in rows:
                     cols = row.find_all("td")
                     if len(cols) >= 5:
-                        date = cols[0].text.strip()
+                        date_str = cols[0].text.strip()
                         number = cols[2].text.strip()
-                        message = cols[4].text.strip()[:600]
+                        message = cols[4].text.strip()
                         
-                        text = f"""🔔 <b>New WhatsApp Code Received</b>
+                        telegram_text = f"""🔔 <b>New WhatsApp Code Received</b>
 
 📱 <b>Number:</b> {number}
-⏰ <b>Time:</b> {date}
+⏰ <b>Time:</b> {date_str}
 
 📩 <b>Message:</b>
 {message}"""
-                        
+
+                        # Telegram-এ পাঠান
                         requests.post(
                             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                            json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
+                            json={
+                                "chat_id": CHAT_ID,
+                                "text": telegram_text,
+                                "parse_mode": "HTML"
+                            }
                         )
-                        time.sleep(0.6)
+                        time.sleep(0.7)   # Telegram Rate Limit এড়ানোর জন্য
             
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Checked")
-            time.sleep(2)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Checked SMS Page")
+            time.sleep(2)   # ২ সেকেন্ড পর পর চেক
             
         except Exception as e:
-            print("Error in loop:", e)
+            print("Error:", e)
             time.sleep(8)
