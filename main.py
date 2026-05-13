@@ -13,7 +13,7 @@ SMS_URL = "http://168.119.13.175/ints/client/SMSCDRStats"
 USERNAME = "smartmethod4k"
 PASSWORD = "smartmethod"
 
-BOT_TOKEN = "8762087022:AAF9hjOokbaUBLJkUOBaUfjWVK7gn9xQFus"
+BOT_TOKEN = "8762087022:AAF9hjOokbaUBLJkUOBaUfjWVK7gn9xFus"
 CHAT_ID = "-1003820143618"
 
 CHECK_INTERVAL = 5
@@ -34,9 +34,17 @@ def solve_captcha(text):
     print("CAPTCHA RAW:", text)
 
     nums = re.findall(r'\d+', text)
-    if len(nums) >= 2:
-        return str(int(nums[0]) + int(nums[1]))
 
+    if len(nums) >= 2:
+        a = int(nums[0])
+        b = int(nums[1])
+
+        result = a + b
+        print("CAPTCHA SOLVED:", result)
+
+        return str(result)
+
+    print("CAPTCHA FAILED -> 0")
     return "0"
 
 # ================= LOGIN =================
@@ -49,31 +57,44 @@ def login():
     r = session.get(LOGIN_URL, timeout=20)
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # debug input fields (first time help)
+    # INPUT DEBUG
     print("📌 INPUT FIELDS:")
     for i in soup.find_all("input"):
         print(i)
 
+    # CAPTCHA PART (FIXED INDENTATION)
     captcha_text = soup.find(string=lambda t: t and "What is" in str(t))
-    if not captcha_text:
+
+    print("CAPTCHA TEXT:", captcha_text)
+
+    if captcha_text:
+        captcha = solve_captcha(captcha_text)
+    else:
         print("❌ CAPTCHA NOT FOUND")
-        return False
+        captcha = "0"
 
-    captcha = solve_captcha(str(captcha_text))
+    print("CAPTCHA FINAL:", captcha)
 
+    # PAYLOAD
     payload = {
-    "username": USERNAME,
-    "password": PASSWORD,
-    "capt": captcha   # 👈 এটা MUST
-}
-    
-    print("🚀 Sending login...")
+        "username": USERNAME,
+        "password": PASSWORD,
+        "capt": captcha
+    }
 
-    res = session.post(LOGIN_URL, data=payload, timeout=20, allow_redirects=True)
+    print("PAYLOAD:", payload)
+
+    # LOGIN REQUEST
+    res = session.post(
+        LOGIN_URL,
+        data=payload,
+        timeout=20,
+        allow_redirects=True
+    )
 
     dash = session.get(DASHBOARD_URL, timeout=20)
 
-    if dash.url != LOGIN_URL and "login" not in dash.text.lower():
+    if "login" not in dash.url.lower():
         print("✅ LOGIN SUCCESS")
         return True
 
