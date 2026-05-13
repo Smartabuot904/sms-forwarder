@@ -2,16 +2,18 @@ import requests
 from bs4 import BeautifulSoup
 import time
 from datetime import datetime
+import re
 
 # ================= CONFIG =================
 
 LOGIN_URL = "http://168.119.13.175/ints/login"
 DASHBOARD_URL = "http://168.119.13.175/ints/client/SMSDashboard"
-SMS_REPORT_URL = "http://168.119.13.175/ints/client/SMSCDRStats"
+SMS_URL = "http://168.119.13.175/ints/client/SMSCDRStats"
 
 USERNAME = "smartmethod4k"
 PASSWORD = "smartmethod"
 
+# 👉 GitHub এ রাখবে (Railway তে না)
 BOT_TOKEN = "8762087022:AAF9hjOokbaUBLJkUOBaUfjWVK7gn9xQFus"
 CHAT_ID = "-1003820143618"
 
@@ -22,225 +24,154 @@ HEADERS = {
     "Referer": LOGIN_URL
 }
 
-# ==========================================
-
 session = requests.Session()
 session.headers.update(HEADERS)
 
-sent_messages = set()
+sent = set()
 
+# ================= CAPTCHA =================
 
 def solve_captcha(text):
-    """
-    Example:
-    What is 5 + 7 = ?
-    """
+    print("CAPTCHA RAW:", text)
 
-    try:
-        text = text.replace("What is", "").replace("=", "").replace("?", "").strip()
-
-        if "+" in text:
-            a, b = text.split("+")
-            return str(int(a.strip()) + int(b.strip()))
-
-    except Exception as e:
-        print("Captcha Error:", e)
+    nums = re.findall(r'\d+', text)
+    if len(nums) >= 2:
+        return str(int(nums[0]) + int(nums[1]))
 
     return "0"
 
+# ================= LOGIN =================
 
 def login():
     global session
 
-    print("🔐 Opening login page...")
+    print("🔐 Login page open...")
 
-    try:
-        r = session.get(LOGIN_URL, timeout=20)
+    r = session.get(LOGIN_URL, timeout=20)
+    soup = BeautifulSoup(r.text, "html.parser")
 
-        soup = BeautifulSoup(r.text, "html.parser")
+    # debug input fields (first time help)
+    print("📌 INPUT FIELDS:")
+    for i in soup.find_all("input"):
+        print(i)
 
-        # captcha বের করা
-        captcha_text = soup.find(string=lambda t: t and "What is" in str(t))
-
-        if not captcha_text:
-            print("❌ Captcha not found")
-            return False
-
-        captcha_answer = solve_captcha(str(captcha_text))
-
-        print("✅ Captcha Solved:", captcha_answer)
-
-        # সব hidden input collect
-        payload = {}
-
-        hidden_inputs = soup.find_all("input", type="hidden")
-
-        for hidden in hidden_inputs:
-            name = hidden.get("name")
-            value = hidden.get("value", "")
-
-            if name:
-                payload[name] = value
-
-        # form input names
-        payload.update({
-            "username": USERNAME,
-            "password": PASSWORD,
-            "captcha": captcha_answer
-        })
-
-        print("🚀 Sending Login Request...")
-
-        response = session.post(
-            LOGIN_URL,
-            data=payload,
-            timeout=20,
-            allow_redirects=True
-        )
-
-        print("Status:", response.status_code)
-        print("Final URL:", response.url)
-
-        # dashboard page check
-        dashboard = session.get(DASHBOARD_URL, timeout=20)
-
-        if "SMSDashboard" in dashboard.text or dashboard.status_code == 200:
-            print("✅ LOGIN SUCCESSFUL")
-            return True
-
-        print("❌ Login Failed")
-
-        # debug html save
-        with open("failed_login.html", "w", encoding="utf-8") as f:
-            f.write(response.text)
-
+    captcha_text = soup.find(string=lambda t: t and "What is" in str(t))
+    if not captcha_text:
+        print("❌ CAPTCHA NOT FOUND")
         return False
 
-    except Exception as e:
-        print("LOGIN ERROR:", e)
-        return False
+    captcha = solve_captcha(str(captcha_text))
 
-
-def send_to_telegram(text):
-
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
-    data = {
-        "chat_id": CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML"
+    payload = {
+        "username": USERNAME,
+        "password": PASSWORD,
+        "captcha": captcha
     }
 
-    try:
-        requests.post(url, json=data, timeout=15)
-    except Exception as e:
-        print("Telegram Error:", e)
+    print("🚀 Sending login...")
 
+    res = session.post(LOGIN_URL, data=payload, timeout=20, allow_redirects=True)
+
+    dash = session.get(DASHBOARD_URL, timeout=20)
+
+    if dash.url != LOGIN_URL and "login" not in dash.text.lower():
+        print("✅ LOGIN SUCCESS")
+        return True
+
+    print("❌ LOGIN FAILED")
+
+    with open("login_fail.html", "w", encoding="utf-8") as f:
+        f.write(res.text)
+
+    return False
+
+# ================= TELEGRAM =================
+
+def send_telegram(text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
+    try:
+        requests.post(url, json={
+            "chat_id": CHAT_ID,
+            "text": text,
+            "parse_mode": "HTML"
+        })
+    except Exception as e:
+        print("Telegram error:", e)
+
+# ================= SMS CHECK =================
 
 def check_sms():
+    print("📨 Checking SMS...")
 
-    print("📨 Opening SMS Report Page...")
+    r = session.get(SMS_URL, timeout=20)
 
-    try:
-        r = session.get(SMS_REPORT_URL, timeout=20)
+    if "login" in r.url.lower():
+        print("⚠ SESSION EXPIRED")
+        return False
 
-        # login expire হলে
-        if "login" in r.url.lower():
-            print("⚠ Session Expired")
-            return False
+    soup = BeautifulSoup(r.text, "html.parser")
 
-        soup = BeautifulSoup(r.text, "html.parser")
+    table = soup.find("table")
 
-        table = soup.find("table")
-
-        if not table:
-            print("❌ SMS Table Not Found")
-
-            with open("sms_page.html", "w", encoding="utf-8") as f:
-                f.write(r.text)
-
-            return True
-
-        rows = table.find_all("tr")[1:20]
-
-        for row in rows:
-
-            cols = row.find_all("td")
-
-            if len(cols) < 5:
-                continue
-
-            try:
-                date_text = cols[0].text.strip()
-                number = cols[2].text.strip()
-                message = cols[4].text.strip()
-
-                unique_id = f"{date_text}-{number}-{message}"
-
-                if unique_id in sent_messages:
-                    continue
-
-                sent_messages.add(unique_id)
-
-                telegram_message = f"""
-🔔 <b>NEW SMS RECEIVED</b>
-
-📱 <b>Number:</b> {number}
-
-⏰ <b>Time:</b>
-{date_text}
-
-📩 <b>Message:</b>
-{message}
-"""
-
-                print("📤 Sending To Telegram...")
-                print(telegram_message)
-
-                send_to_telegram(telegram_message)
-
-                time.sleep(1)
-
-            except Exception as e:
-                print("Row Error:", e)
-
+    if not table:
+        print("❌ TABLE NOT FOUND")
         return True
 
-    except Exception as e:
-        print("SMS CHECK ERROR:", e)
-        return True
+    rows = table.find_all("tr")[1:20]
 
+    for row in rows:
+        cols = row.find_all("td")
+
+        if len(cols) < 5:
+            continue
+
+        date = cols[0].text.strip()
+        number = cols[2].text.strip()
+        msg = cols[4].text.strip()
+
+        uid = f"{date}-{number}-{msg}"
+
+        if uid in sent:
+            continue
+
+        sent.add(uid)
+
+        text = f"""🔔 NEW SMS
+
+📱 Number: {number}
+⏰ Time: {date}
+
+📩 Message:
+{msg}"""
+
+        print("📤 Sending Telegram...")
+        send_telegram(text)
+
+        time.sleep(1)
+
+    return True
 
 # ================= MAIN =================
 
 if __name__ == "__main__":
 
-    print("🚀 SMS FORWARDER STARTED")
+    print("🚀 BOT STARTED")
 
     while True:
-
         if login():
             break
-
-        print("🔄 Retrying login after 30 seconds...")
         time.sleep(30)
 
-    print("✅ BOT IS NOW MONITORING SMS")
+    print("✅ MONITORING SMS...")
 
     while True:
 
         ok = check_sms()
 
-        # session expire হলে আবার login
         if not ok:
-
-            print("🔑 Re-Logging...")
-
-            while True:
-
-                if login():
-                    break
-
+            print("🔄 RELOGIN...")
+            while not login():
                 time.sleep(20)
 
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Checked")
